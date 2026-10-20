@@ -6,3 +6,13 @@ tickethub:
     expiration-job:
       # у тестах job викликається напряму
       enabled: false
+    redis-claims:
+      enabled: true
+  rate-limit:
+    # тести логіняться десятки разів з 127.0.0.1; самі ліміти перевіряє RateLimitIT
+    login:
+      capacity: 100000
+      period: 1m
+    orders:
+      capacity: 100000
+      period: 1m

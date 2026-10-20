@@ -4,6 +4,13 @@ spring:
   threads:
     virtual:
       enabled: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      # Redis — лише прискорювач: при збої краще швидко піти в БД, ніж чекати
+      timeout: 500ms
+      connect-timeout: 1s
   datasource:
     url: jdbc:postgresql://localhost:5432/tickethub
     username: tickethub
@@ -55,3 +62,17 @@ tickethub:
       enabled: true
       interval: 30s
       batch-size: 100
+    # швидкий відсів зайнятих місць у Redis до транзакції в Postgres (вимикається для порівняння k6)
+    redis-claims:
+      enabled: true
+  cache:
+    # карта місць GET /events/{id}/seats; інвалідується при зміні статусів
+    seat-map-ttl: 3s
+  rate-limit:
+    enabled: true
+    login:
+      capacity: 10
+      period: 1m
+    orders:
+      capacity: 20
+      period: 1m

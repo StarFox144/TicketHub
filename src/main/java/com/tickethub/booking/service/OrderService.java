@@ -4,6 +4,7 @@ import com.tickethub.booking.api.dto.CreateOrderRequest;
 import com.tickethub.booking.api.dto.OrderView;
 import com.tickethub.booking.domain.Order;
 import com.tickethub.booking.repository.OrderRepository;
+import com.tickethub.booking.service.SeatClaimService.ClaimResult;
 import com.tickethub.common.exception.BusinessRuleException;
 import com.tickethub.common.exception.NotFoundException;
 import com.tickethub.common.security.CurrentUser;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -27,16 +29,18 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final EventSeatService eventSeatService;
+    private final SeatClaimService seatClaims;
     private final BookingProperties properties;
     private final OrderMapper mapper;
     private final Clock clock;
     private final TransactionTemplate tx;
 
     public OrderService(OrderRepository orderRepository, EventSeatService eventSeatService,
-                        BookingProperties properties, OrderMapper mapper, Clock clock,
+                        SeatClaimService seatClaims, BookingProperties properties, OrderMapper mapper, Clock clock,
                         PlatformTransactionManager transactionManager) {
         this.orderRepository = orderRepository;
         this.eventSeatService = eventSeatService;
+        this.seatClaims = seatClaims;
         this.properties = properties;
         this.mapper = mapper;
         this.clock = clock;
@@ -62,12 +66,27 @@ public class OrderService {
         if (replay.isPresent()) {
             return new PlacedOrder(replay.get(), false);
         }
+
+        var claimToken = SeatClaimService.tokenFor(userId, idempotencyKey);
+        List<UUID> newlyClaimed = switch (seatClaims.claim(request.eventSeatIds(), claimToken,
+                properties.reservationTtl())) {
+            // хтось уже тримає місце в Redis — 409 без жодного звернення до Postgres
+            case ClaimResult.Taken taken -> throw new SeatsUnavailableException(taken.seatIds());
+            case ClaimResult.Claimed claimed -> claimed.newlyClaimed();
+            case ClaimResult.Skipped skipped -> List.of();
+        };
+
         try {
             return new PlacedOrder(tx.execute(status -> reserve(userId, request, idempotencyKey)), true);
-        } catch (SeatsUnavailableException | DataIntegrityViolationException e) {
-            return findReplay(userId, request, idempotencyKey)
-                    .map(order -> new PlacedOrder(order, false))
-                    .orElseThrow(() -> e);
+        } catch (RuntimeException e) {
+            // БД відмовила (місце зайняте, ключ уже використано...) — звільняємо те, що щойно застовпили в Redis
+            seatClaims.release(newlyClaimed, claimToken);
+            if (e instanceof SeatsUnavailableException || e instanceof DataIntegrityViolationException) {
+                return findReplay(userId, request, idempotencyKey)
+                        .map(order -> new PlacedOrder(order, false))
+                        .orElseThrow(() -> e);
+            }
+            throw e;
         }
     }
 
@@ -115,6 +134,7 @@ public class OrderService {
                 .orElseThrow(() -> new NotFoundException("Order", orderId));
         order.cancel();
         eventSeatService.release(order.seatIds());
+        seatClaims.release(order.seatIds(), SeatClaimService.tokenFor(userId, order.getIdempotencyKey()));
         return mapper.toView(order, clock.instant());
     }
 }

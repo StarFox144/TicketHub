@@ -14,9 +14,13 @@ import java.time.Duration;
 public record BookingProperties(
         @NotNull Duration reservationTtl,
         @Min(1) int maxSeatsPerOrder,
-        @Valid @NotNull ExpirationJob expirationJob
+        @Valid @NotNull ExpirationJob expirationJob,
+        @NotNull RedisClaims redisClaims
 ) {
 
     public record ExpirationJob(boolean enabled, @NotNull Duration interval, @Min(1) int batchSize) {
+    }
+
+    public record RedisClaims(boolean enabled) {
     }
 }

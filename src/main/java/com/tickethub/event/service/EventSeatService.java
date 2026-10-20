@@ -30,12 +30,14 @@ public class EventSeatService {
     private final EventRepository eventRepository;
     private final EventSeatRepository eventSeatRepository;
     private final SeatLockingStrategy locking;
+    private final SeatMapService seatMapService;
 
     public EventSeatService(EventRepository eventRepository, EventSeatRepository eventSeatRepository,
-                            SeatLockingStrategy locking) {
+                            SeatLockingStrategy locking, SeatMapService seatMapService) {
         this.eventRepository = eventRepository;
         this.eventSeatRepository = eventSeatRepository;
         this.locking = locking;
+        this.seatMapService = seatMapService;
     }
 
     /**
@@ -62,6 +64,7 @@ public class EventSeatService {
 
         seats.forEach(s -> s.reserve(ttl, now));
         locking.afterReserve(sortedIds);
+        seatMapService.evictAfterCommit(eventId);
 
         return seats.stream()
                 .map(s -> new ReservedSeat(s.getId(), s.getPriceZone().getPrice(), s.getPriceZone().getCurrency()))
@@ -70,6 +73,8 @@ public class EventSeatService {
 
     /** Звільнити місця скасованого чи простроченого замовлення. */
     public void release(Collection<UUID> seatIds) {
-        eventSeatRepository.findAllById(seatIds).forEach(EventSeat::release);
+        var seats = eventSeatRepository.findAllById(seatIds);
+        seats.forEach(EventSeat::release);
+        seats.stream().map(s -> s.getEvent().getId()).distinct().forEach(seatMapService::evictAfterCommit);
     }
 }

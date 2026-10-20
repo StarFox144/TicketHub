@@ -45,15 +45,18 @@ public class EventService {
 
     private final EventRepository eventRepository;
     private final EventSeatRepository eventSeatRepository;
+    private final SeatMapService seatMapService;
     private final VenueService venueService;
     private final UserService userService;
     private final EventMapper mapper;
     private final Clock clock;
 
     public EventService(EventRepository eventRepository, EventSeatRepository eventSeatRepository,
-                        VenueService venueService, UserService userService, EventMapper mapper, Clock clock) {
+                        SeatMapService seatMapService, VenueService venueService, UserService userService,
+                        EventMapper mapper, Clock clock) {
         this.eventRepository = eventRepository;
         this.eventSeatRepository = eventSeatRepository;
+        this.seatMapService = seatMapService;
         this.venueService = venueService;
         this.userService = userService;
         this.mapper = mapper;
@@ -112,7 +115,7 @@ public class EventService {
     /** Карта місць зі статусами. Для чернетки — 404 тим самим правилом, що й деталі події. */
     public List<SeatView> seatMap(UUID id, CurrentUser viewer) {
         get(id, viewer);
-        return eventSeatRepository.findSeatMap(id);
+        return seatMapService.seatMap(id);
     }
 
     private SeatRange toRange(SeatRangeDto dto, Set<UUID> venueSections) {

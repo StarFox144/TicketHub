@@ -39,6 +39,7 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: local
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tickethub
+      SPRING_DATA_REDIS_HOST: redis
     ports: ["8080:8080"]
 
 volumes:

@@ -1,9 +1,13 @@
 package com.tickethub.common.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tickethub.common.security.JwtAuthFilter;
 import com.tickethub.common.security.JwtProperties;
 import com.tickethub.common.security.JwtService;
 import com.tickethub.common.security.ProblemDetailSecurityHandler;
+import com.tickethub.common.security.RateLimitFilter;
+import com.tickethub.common.security.RateLimitProperties;
+import com.tickethub.common.security.RateLimiter;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,12 +27,14 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  */
 @Configuration
 @EnableMethodSecurity
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({JwtProperties.class, RateLimitProperties.class})
 public class SecurityConfig {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService jwtService,
-                                            ProblemDetailSecurityHandler problemHandler) throws Exception {
+                                            ProblemDetailSecurityHandler problemHandler,
+                                            RateLimiter rateLimiter, RateLimitProperties rateLimitProperties,
+                                            ObjectMapper objectMapper) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -46,6 +52,7 @@ public class SecurityConfig {
                         .authenticationEntryPoint(problemHandler)
                         .accessDeniedHandler(problemHandler))
                 .addFilterBefore(new JwtAuthFilter(jwtService), UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(new RateLimitFilter(rateLimiter, rateLimitProperties, objectMapper), JwtAuthFilter.class)
                 .build();
     }
 

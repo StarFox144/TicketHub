@@ -20,6 +20,7 @@ repositories {
 val mapstructVersion = "1.6.3"
 val springdocVersion = "2.8.13"
 val jjwtVersion = "0.12.6"
+val bucket4jVersion = "8.14.0"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -27,6 +28,10 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
+    implementation("org.springframework.boot:spring-boot-starter-cache")
+    implementation("com.bucket4j:bucket4j_jdk17-core:$bucket4jVersion")
+    implementation("com.bucket4j:bucket4j_jdk17-lettuce:$bucket4jVersion")
     implementation("org.flywaydb:flyway-core")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:$springdocVersion")
