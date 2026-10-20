@@ -18,7 +18,7 @@ public record BookingProperties(
         @NotNull RedisClaims redisClaims
 ) {
 
-    public record ExpirationJob(boolean enabled, @NotNull Duration interval, @Min(1) int batchSize) {
+    public record ExpirationJob(@NotNull Duration interval, @Min(1) int batchSize) {
     }
 
     public record RedisClaims(boolean enabled) {

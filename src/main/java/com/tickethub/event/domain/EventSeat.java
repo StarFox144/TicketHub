@@ -77,6 +77,17 @@ public class EventSeat extends BaseEntity {
         reservedUntil = null;
     }
 
+    /**
+     * Продаж без резерву — лише для запізнілої оплати: резерв протух і місце звільнилось,
+     * але ніхто інший його не встиг зайняти, тож гроші не повертаємо, а продаємо.
+     */
+    public void sellAvailable() {
+        if (status != SeatStatus.AVAILABLE) {
+            throw new SeatsUnavailableException(List.of(getId()));
+        }
+        status = SeatStatus.SOLD;
+    }
+
     public boolean isAvailable() {
         return status == SeatStatus.AVAILABLE;
     }

@@ -3,8 +3,7 @@
 Бекенд сервісу продажу квитків на події з вибором конкретного місця в залі.
 Головна інженерна задача — коректний продаж при одночасних покупках: одне місце ніколи не продається двічі.
 
-**Стек:** Java 21 · Spring Boot 3.5 · Spring Security + JWT (jjwt) · PostgreSQL 16 · Redis 7 + Bucket4j · Flyway · MapStruct · springdoc-openapi · JUnit 5 + Testcontainers.
-Далі за планом: RabbitMQ, OpenPDF + ZXing, Mailpit.
+**Стек:** Java 21 · Spring Boot 3.5 · Spring Security + JWT (jjwt) · PostgreSQL 16 · Redis 7 + Bucket4j · RabbitMQ · OpenPDF + ZXing · Spring Mail · Flyway · MapStruct · springdoc-openapi · JUnit 5 + Testcontainers.
 
 ## Запуск
 
@@ -33,8 +32,8 @@ docker compose up -d postgres redis rabbitmq mailpit   # інфраструкт�
 | `organizer@tickethub.local` | ORGANIZER |
 | `user@tickethub.local` | USER |
 
-Поза профілем `local` застосунок не стартує без секрету JWT: задайте `TICKETHUB_SECURITY_JWT_SECRET`
-(base64, щонайменше 256 біт, наприклад `openssl rand -base64 64`).
+Поза профілем `local` застосунок не стартує без секретів: `TICKETHUB_SECURITY_JWT_SECRET`
+(base64, щонайменше 256 біт, наприклад `openssl rand -base64 64`) і `TICKETHUB_PAYMENT_WEBHOOK_SECRET`.
 
 ## Автентифікація
 
@@ -114,17 +113,43 @@ PostgreSQL — єдине джерело правди про статус міс
 місце до 10 хв може отримувати хибний `409` (але ніколи — подвійний продаж).
 За балансувальником потрібен `server.forward-headers-strategy`, інакше ліміт логіну рахуватиметься на IP проксі.
 
+## Оплата і квитки
+
+```
+POST /orders/{id}/pay  →  сторінка провайдера  →  webhook (HMAC)  →  одна транзакція:
+                                                   Payment SUCCEEDED, Order PAID, місця SOLD, запис в outbox
+outbox-relay (1 с)  →  RabbitMQ: tickets / order.paid  →  ticket.generate  →  квитки + QR + PDF + email
+                                                          └─ 3 ретраї з backoff → ticket.generate.dlq
+```
+
+- **Фейковий провайдер** — справжньої платіжки в MVP немає. `POST /orders/{id}/pay` повертає `checkoutUrl`:
+  відкрийте його в браузері й натисніть «Оплатити» чи «Відхилити» — провайдер надішле підписаний webhook.
+- **Webhook** підписано HMAC-SHA256 від `{timestamp}.{тіло}` (заголовки `X-Signature`, `X-Timestamp`):
+  підроблений, змінений або перехоплений і повторений пізніше ніж за 5 хв запит відхиляється з `401`.
+  Повторна доставка того самого webhook нічого не змінює.
+- **Запізніла оплата.** Якщо гроші прийшли після протухання резерву: місця досі вільні — продаємо їх цьому замовленню;
+  уже зайняті іншим або замовлення скасоване — автоматичний refund і статус `REFUNDED`.
+- **Transactional outbox.** Подія `order.paid` пишеться в таблицю `outbox` у тій самій транзакції, що й `PAID`,
+  тож не губиться, навіть якщо RabbitMQ недоступний у момент оплати. Relay позначає подію надісланою лише після
+  publisher confirm від брокера. Доставка at-least-once, тому генерація квитків ідемпотентна.
+- **Квитки.** На кожне місце — квиток із 192-бітним випадковим кодом у QR (ZXing) і PDF (OpenPDF; шрифт DejaVu Sans
+  вбудовано, бо стандартні шрифти PDF не мають кирилиці). PDF зберігаються в `tickethub.tickets.storage-dir`
+  і перегенеровуються, якщо файл зник. Лист із квитками — у Mailpit: http://localhost:8025.
+- **Вхід.** `POST /tickets/scan {eventId, code}` — лише організатор цієї події. Квиток пропускає рівно один раз,
+  навіть якщо два сканери зчитали його одночасно; повтор — `409` з часом першого проходу.
+
 ## Тести
 
 ```bash
 ./gradlew test
 ```
 
-Інтеграційні тести (`*IT`) піднімають справжні PostgreSQL і Redis через Testcontainers, тому потрібен запущений Docker.
+Інтеграційні тести (`*IT`) піднімають справжні PostgreSQL, Redis, RabbitMQ і Mailpit через Testcontainers, тому потрібен запущений Docker.
+`PurchaseFlowE2EIT` проходить увесь сценарій: резерв → оплата → webhook по HTTP → outbox → RabbitMQ → лист із PDF → сканування.
 
 ## Структура
 
-Модульний моноліт, package-by-feature: `common`, `user`, `venue`, `event`, `booking`, далі — `payment`, `ticket`.
+Модульний моноліт, package-by-feature: `common`, `user`, `venue`, `event`, `booking`, `payment`, `ticket`.
 Кожен модуль має `api`, `domain`, `repository`, `service`. Модулі звертаються один до одного лише через сервіси,
 ніколи через чужі репозиторії.
 
@@ -138,5 +163,5 @@ PostgreSQL — єдине джерело правди про статус міс
 - [x] **Етап 2. Користувачі й безпека** — реєстрація, JWT + refresh, ролі, перевірка власника
 - [x] **Етап 3. Бронювання** — `EventSeat`, публікація, `POST /orders` з песимістичним блокуванням, ідемпотентність, протухання резервів, тест на 50 потоків
 - [x] **Етап 4. Redis** — `SET NX EX`, кеш карти місць, rate limiting
-- [ ] **Етап 5. Оплата і квитки** — фейковий провайдер, HMAC-webhook, outbox, RabbitMQ, QR + PDF, email
+- [x] **Етап 5. Оплата і квитки** — фейковий провайдер, HMAC-webhook, outbox, RabbitMQ, QR + PDF, email
 - [ ] **Етап 6. Полірування** — JaCoCo, ArchUnit, k6, діаграма архітектури

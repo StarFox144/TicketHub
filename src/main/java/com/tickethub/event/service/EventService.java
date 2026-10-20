@@ -27,10 +27,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.tickethub.event.repository.EventSpecifications.hasStatus;
@@ -110,6 +113,16 @@ public class EventService {
         eventSeatRepository.saveAll(eventSeats);
         eventSeatRepository.flush();
         return mapper.toView(event);
+    }
+
+    /** Для модуля ticket: дані події та підписи місць для PDF і листа. */
+    public TicketEventInfo ticketInfo(UUID eventId, Collection<UUID> eventSeatIds) {
+        var event = getEvent(eventId);
+        var venue = event.getVenue();
+        var seats = eventSeatRepository.findSeatViews(eventSeatIds).stream()
+                .collect(Collectors.toMap(SeatView::id, Function.identity()));
+        return new TicketEventInfo(event.getId(), event.getTitle(), event.getStartsAt(),
+                venue.getName(), venue.getAddress(), venue.getCity(), seats);
     }
 
     /** Карта місць зі статусами. Для чернетки — 404 тим самим правилом, що й деталі події. */

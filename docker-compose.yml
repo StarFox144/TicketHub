@@ -40,7 +40,12 @@ services:
       SPRING_PROFILES_ACTIVE: local
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tickethub
       SPRING_DATA_REDIS_HOST: redis
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_MAIL_HOST: mailpit
+      TICKETHUB_TICKETS_STORAGE_DIR: /app/data/tickets
     ports: ["8080:8080"]
+    volumes: [tickets:/app/data]
 
 volumes:
   pgdata:
+  tickets:

@@ -21,6 +21,8 @@ val mapstructVersion = "1.6.3"
 val springdocVersion = "2.8.13"
 val jjwtVersion = "0.12.6"
 val bucket4jVersion = "8.14.0"
+val openpdfVersion = "2.2.2"
+val zxingVersion = "3.5.3"
 
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -30,6 +32,11 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-cache")
+    implementation("org.springframework.boot:spring-boot-starter-amqp")
+    implementation("org.springframework.boot:spring-boot-starter-mail")
+    implementation("com.github.librepdf:openpdf:$openpdfVersion")
+    implementation("com.google.zxing:core:$zxingVersion")
+    implementation("com.google.zxing:javase:$zxingVersion")
     implementation("com.bucket4j:bucket4j_jdk17-core:$bucket4jVersion")
     implementation("com.bucket4j:bucket4j_jdk17-lettuce:$bucket4jVersion")
     implementation("org.flywaydb:flyway-core")
@@ -47,6 +54,8 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
+    testImplementation("org.testcontainers:rabbitmq")
+    testImplementation("org.awaitility:awaitility")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

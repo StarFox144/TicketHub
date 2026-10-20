@@ -47,6 +47,9 @@ public class SecurityConfig {
                                 "/api/v1/events/*/seats", "/api/v1/venues", "/api/v1/venues/*").permitAll()
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/actuator/health/**", "/error").permitAll()
+                        // webhook захищений HMAC-підписом, а не JWT; сторінка оплати належить «провайдеру»
+                        .requestMatchers(HttpMethod.POST, "/api/v1/payments/webhook").permitAll()
+                        .requestMatchers("/fake-provider/**").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(problemHandler)

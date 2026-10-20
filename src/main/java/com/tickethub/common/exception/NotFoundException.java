@@ -10,6 +10,10 @@ public non-sealed class NotFoundException extends DomainException {
         super("%s %s not found".formatted(resource, id));
     }
 
+    public NotFoundException(String message) {
+        super(message);
+    }
+
     @Override
     public HttpStatus status() {
         return HttpStatus.NOT_FOUND;

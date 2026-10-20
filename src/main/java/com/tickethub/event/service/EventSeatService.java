@@ -71,10 +71,35 @@ public class EventSeatService {
                 .toList();
     }
 
+    /** Оплата пройшла: зарезервовані місця стають проданими. */
+    public void markSold(Collection<UUID> seatIds) {
+        var seats = eventSeatRepository.lockByIds(seatIds);
+        seats.forEach(EventSeat::markSold);
+        evictSeatMaps(seats);
+    }
+
+    /**
+     * Запізніла оплата протухлого замовлення: продати місця, якщо всі досі вільні.
+     * false — хоч одне вже зайняте іншим покупцем, і замовлення треба повернути (refund).
+     */
+    public boolean sellIfStillAvailable(Collection<UUID> seatIds) {
+        var seats = eventSeatRepository.lockByIds(seatIds);
+        if (seats.size() != seatIds.size() || !seats.stream().allMatch(EventSeat::isAvailable)) {
+            return false;
+        }
+        seats.forEach(EventSeat::sellAvailable);
+        evictSeatMaps(seats);
+        return true;
+    }
+
     /** Звільнити місця скасованого чи простроченого замовлення. */
     public void release(Collection<UUID> seatIds) {
         var seats = eventSeatRepository.findAllById(seatIds);
         seats.forEach(EventSeat::release);
+        evictSeatMaps(seats);
+    }
+
+    private void evictSeatMaps(Collection<EventSeat> seats) {
         seats.stream().map(s -> s.getEvent().getId()).distinct().forEach(seatMapService::evictAfterCommit);
     }
 }

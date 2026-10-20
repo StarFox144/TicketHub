@@ -3,10 +3,19 @@ package com.tickethub.booking.service;
 import com.tickethub.booking.api.dto.CreateOrderRequest;
 import com.tickethub.booking.api.dto.OrderView;
 import com.tickethub.booking.domain.Order;
+import com.tickethub.booking.domain.OrderItem;
+import com.tickethub.booking.domain.OrderStatus;
+import com.tickethub.booking.messaging.OrderPaid;
 import com.tickethub.booking.repository.OrderRepository;
+import com.tickethub.booking.service.OrderPayments.PaidItem;
+import com.tickethub.booking.service.OrderPayments.PaidOrder;
+import com.tickethub.booking.service.OrderPayments.PayableOrder;
+import com.tickethub.booking.service.OrderPayments.PaymentConfirmation;
 import com.tickethub.booking.service.SeatClaimService.ClaimResult;
 import com.tickethub.common.exception.BusinessRuleException;
+import com.tickethub.common.exception.ConflictException;
 import com.tickethub.common.exception.NotFoundException;
+import com.tickethub.common.outbox.OutboxPublisher;
 import com.tickethub.common.security.CurrentUser;
 import com.tickethub.event.domain.SeatsUnavailableException;
 import com.tickethub.event.service.EventSeatService;
@@ -16,6 +25,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -30,17 +40,19 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final EventSeatService eventSeatService;
     private final SeatClaimService seatClaims;
+    private final OutboxPublisher outbox;
     private final BookingProperties properties;
     private final OrderMapper mapper;
     private final Clock clock;
     private final TransactionTemplate tx;
 
     public OrderService(OrderRepository orderRepository, EventSeatService eventSeatService,
-                        SeatClaimService seatClaims, BookingProperties properties, OrderMapper mapper, Clock clock,
-                        PlatformTransactionManager transactionManager) {
+                        SeatClaimService seatClaims, OutboxPublisher outbox, BookingProperties properties,
+                        OrderMapper mapper, Clock clock, PlatformTransactionManager transactionManager) {
         this.orderRepository = orderRepository;
         this.eventSeatService = eventSeatService;
         this.seatClaims = seatClaims;
+        this.outbox = outbox;
         this.properties = properties;
         this.mapper = mapper;
         this.clock = clock;
@@ -126,7 +138,70 @@ public class OrderService {
         return orderRepository.findByUserId(userId, pageable).map(order -> mapper.toView(order, now));
     }
 
-    /** Скасувати можна лише PENDING; оплачене замовлення — через повернення коштів (етап 5). */
+    /** Для модуля payment: замовлення, яке цей користувач може оплатити просто зараз. */
+    @Transactional(readOnly = true)
+    public PayableOrder getPayableOrder(UUID orderId, UUID userId) {
+        var order = orderRepository.findById(orderId)
+                .filter(o -> o.isOwnedBy(userId))
+                .orElseThrow(() -> new NotFoundException("Order", orderId));
+        if (!order.isAwaitingPayment(clock.instant())) {
+            throw new ConflictException("Order is not awaiting payment, its status is " + order.getStatus());
+        }
+        return new PayableOrder(order.getId(), order.getTotalAmount(), order.getCurrency());
+    }
+
+    /**
+     * Для модуля payment: гроші надійшли — оформити продаж у транзакції webhook-а.
+     * Замовлення блокується, тож оплата не перетнеться з ExpiredReservationJob чи скасуванням.
+     * <ul>
+     *   <li>PENDING — місця RESERVED → SOLD, замовлення PAID, подія order.paid в outbox;</li>
+     *   <li>EXPIRED — якщо місця досі вільні, продаємо їх цьому замовленню; інакше refund;</li>
+     *   <li>CANCELLED — покупець передумав, а оплата вже пройшла: refund.</li>
+     * </ul>
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public PaymentConfirmation confirmPayment(UUID orderId) {
+        var order = orderRepository.findForUpdateById(orderId)
+                .orElseThrow(() -> new NotFoundException("Order", orderId));
+        switch (order.getStatus()) {
+            case PENDING -> {
+                eventSeatService.markSold(order.seatIds());
+                order.markPaid();
+            }
+            case EXPIRED -> {
+                if (!eventSeatService.sellIfStillAvailable(order.seatIds())) {
+                    order.markRefunded();
+                    return PaymentConfirmation.REFUND_REQUIRED;
+                }
+                order.markPaidAfterExpiry();
+            }
+            case CANCELLED -> {
+                order.markRefunded();
+                return PaymentConfirmation.REFUND_REQUIRED;
+            }
+            case PAID, REFUNDED -> throw new ConflictException(
+                    "Order %s has already been settled with status %s".formatted(orderId, order.getStatus()));
+        }
+        outbox.publish("Order", order.getId(), OrderPaid.EVENT_TYPE,
+                new OrderPaid(order.getId(), order.getUserId(), order.getEventId()));
+        // місця продано — ключі в Redis більше не потрібні, далі їх захищає статус SOLD у БД
+        seatClaims.release(order.seatIds(), SeatClaimService.tokenFor(order.getUserId(), order.getIdempotencyKey()));
+        return PaymentConfirmation.PAID;
+    }
+
+    /** Для модуля ticket: оплачене замовлення з позиціями; порожньо, якщо замовлення не (вже) оплачене. */
+    @Transactional(readOnly = true)
+    public Optional<PaidOrder> findPaidOrder(UUID orderId) {
+        return orderRepository.findById(orderId)
+                .filter(order -> order.getStatus() == OrderStatus.PAID)
+                .map(order -> new PaidOrder(order.getId(), order.getUserId(), order.getEventId(),
+                        order.getItems().stream()
+                                .filter(OrderItem::isActive)
+                                .map(item -> new PaidItem(item.getId(), item.getEventSeatId(), item.getPrice()))
+                                .toList()));
+    }
+
+    /** Скасувати можна лише PENDING; повернення коштів за оплачене замовлення — поза межами MVP. */
     @Transactional
     public OrderView cancel(UUID orderId, UUID userId) {
         var order = orderRepository.findForUpdateById(orderId)

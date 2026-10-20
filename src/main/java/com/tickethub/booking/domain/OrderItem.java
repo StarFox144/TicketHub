@@ -45,6 +45,10 @@ public class OrderItem extends BaseEntity {
         active = false;
     }
 
+    void activate() {
+        active = true;
+    }
+
     public UUID getEventSeatId() {
         return eventSeatId;
     }

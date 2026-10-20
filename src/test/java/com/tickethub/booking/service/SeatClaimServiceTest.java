@@ -47,7 +47,7 @@ class SeatClaimServiceTest {
 
     private static BookingProperties properties(boolean claimsEnabled) {
         return new BookingProperties(TTL, 10,
-                new BookingProperties.ExpirationJob(false, Duration.ofSeconds(30), 100),
+                new BookingProperties.ExpirationJob(Duration.ofSeconds(30), 100),
                 new BookingProperties.RedisClaims(claimsEnabled));
     }
 }
