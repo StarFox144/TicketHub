@@ -8,7 +8,7 @@ RUN ./gradlew bootJar --no-daemon -x test
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
-RUN useradd --system --uid 1001 tickethub
+RUN useradd --system --uid 1001 tickethub && mkdir -p /app/data && chown tickethub /app/data
 COPY --from=build /workspace/build/libs/*.jar app.jar
 USER tickethub
 EXPOSE 8080

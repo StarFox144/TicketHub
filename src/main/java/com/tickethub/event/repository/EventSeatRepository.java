@@ -36,6 +36,22 @@ public interface EventSeatRepository extends JpaRepository<EventSeat, UUID> {
             """)
     List<EventSeat> findForReservation(UUID eventId, Collection<UUID> ids);
 
+    /** Блокування набору місць за id (продаж після оплати); порядок за id — як і при резерві. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from EventSeat s where s.id in :ids order by s.id")
+    List<EventSeat> lockByIds(Collection<UUID> ids);
+
+    @Query("""
+            select new com.tickethub.event.api.dto.SeatView(
+                es.id, sec.name, s.rowNumber, s.seatNumber, z.name, z.price, z.currency, es.status)
+            from EventSeat es
+            join es.seat s
+            join s.section sec
+            join es.priceZone z
+            where es.id in :ids
+            """)
+    List<SeatView> findSeatViews(Collection<UUID> ids);
+
     @Query("""
             select new com.tickethub.event.api.dto.SeatView(
                 es.id, sec.name, s.rowNumber, s.seatNumber, z.name, z.price, z.currency, es.status)

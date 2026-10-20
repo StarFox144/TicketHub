@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <title>Ваші квитки</title>
+</head>
+<body style="margin:0;padding:24px;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif;color:#18181b">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+         style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:8px;padding:24px">
+    <tr><td>
+      <p style="margin:0 0 4px;font-size:12px;letter-spacing:1px;color:#71717a">TICKETHUB</p>
+      <h1 style="margin:0 0 16px;font-size:22px">{{eventTitle}}</h1>
+      <p style="margin:0 0 4px">Вітаємо, {{fullName}}! Оплату отримано — ваші квитки в додатку до листа.</p>
+      <p style="margin:0 0 16px;color:#52525b">{{startsAt}} · {{venue}}</p>
+      <table role="presentation" width="100%" cellpadding="8" cellspacing="0"
+             style="border-collapse:collapse;font-size:14px">
+        <tr style="background:#f4f4f5;text-align:left">
+          <th>Секція</th><th>Ряд</th><th>Місце</th><th>Зона</th><th style="text-align:right">Ціна</th>
+        </tr>
+        {{seatRows}}
+      </table>
+      <p style="margin:16px 0 0;font-size:13px;color:#71717a">
+        Покажіть QR-код із PDF на вході. Кожен код пропускає лише один раз.<br>
+        Замовлення {{orderId}}
+      </p>
+    </td></tr>
+  </table>
+</body>
+</html>

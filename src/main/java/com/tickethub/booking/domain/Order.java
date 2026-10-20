@@ -93,6 +93,32 @@ public class Order extends BaseEntity {
         items.forEach(OrderItem::deactivate);
     }
 
+    public void markPaid() {
+        requirePending("paid");
+        status = OrderStatus.PAID;
+    }
+
+    /** Оплата прийшла після протухання, але місця досі вільні й уже продані цьому замовленню. */
+    public void markPaidAfterExpiry() {
+        if (status != OrderStatus.EXPIRED) {
+            throw new ConflictException("Order in status %s cannot be paid after expiry".formatted(status));
+        }
+        status = OrderStatus.PAID;
+        items.forEach(OrderItem::activate);
+    }
+
+    /** Гроші надійшли, але продати місця вже неможливо (протухло й зайняте іншим або скасоване). */
+    public void markRefunded() {
+        if (status != OrderStatus.EXPIRED && status != OrderStatus.CANCELLED) {
+            throw new ConflictException("Order in status %s cannot be refunded".formatted(status));
+        }
+        status = OrderStatus.REFUNDED;
+    }
+
+    public boolean isAwaitingPayment(Instant now) {
+        return status == OrderStatus.PENDING && expiresAt.isAfter(now);
+    }
+
     /** Чи описує це замовлення той самий запит (для перевірки повторів з тим самим Idempotency-Key). */
     public boolean matchesRequest(UUID eventId, Collection<UUID> eventSeatIds) {
         return this.eventId.equals(eventId) && new HashSet<>(seatIds()).equals(new HashSet<>(eventSeatIds));

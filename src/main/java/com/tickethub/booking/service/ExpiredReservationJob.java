@@ -22,15 +22,17 @@ public class ExpiredReservationJob {
 
     private final OrderRepository orderRepository;
     private final EventSeatService eventSeatService;
+    private final SeatClaimService seatClaims;
     private final BookingProperties properties;
     private final Clock clock;
     private final TransactionTemplate tx;
 
     public ExpiredReservationJob(OrderRepository orderRepository, EventSeatService eventSeatService,
-                                 BookingProperties properties, Clock clock,
+                                 SeatClaimService seatClaims, BookingProperties properties, Clock clock,
                                  PlatformTransactionManager transactionManager) {
         this.orderRepository = orderRepository;
         this.eventSeatService = eventSeatService;
+        this.seatClaims = seatClaims;
         this.properties = properties;
         this.clock = clock;
         this.tx = new TransactionTemplate(transactionManager);
@@ -56,6 +58,8 @@ public class ExpiredReservationJob {
         orders.forEach(order -> {
             order.expire();
             eventSeatService.release(order.seatIds());
+            // ключі в Redis мають той самий TTL і зазвичай уже зникли; прибираємо на випадок розбіжності годинників
+            seatClaims.release(order.seatIds(), SeatClaimService.tokenFor(order.getUserId(), order.getIdempotencyKey()));
         });
         return orders.size();
     }

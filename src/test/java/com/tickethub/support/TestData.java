@@ -13,6 +13,7 @@ import com.tickethub.venue.api.dto.CreateSectionRequest;
 import com.tickethub.venue.api.dto.CreateVenueRequest;
 import com.tickethub.venue.api.dto.VenueView;
 import com.tickethub.venue.service.VenueService;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -33,15 +34,17 @@ public class TestData {
     private final VenueService venueService;
     private final EventService eventService;
     private final JwtService jwtService;
+    private final StringRedisTemplate redis;
     /** BCrypt навмисно повільний — рахуємо хеш один раз, а не для кожного з 50 користувачів. */
     private final String passwordHash;
 
     public TestData(UserRepository userRepository, VenueService venueService, EventService eventService,
-                    PasswordEncoder passwordEncoder, JwtService jwtService) {
+                    PasswordEncoder passwordEncoder, JwtService jwtService, StringRedisTemplate redis) {
         this.userRepository = userRepository;
         this.venueService = venueService;
         this.eventService = eventService;
         this.jwtService = jwtService;
+        this.redis = redis;
         this.passwordHash = passwordEncoder.encode(PASSWORD);
     }
 
@@ -62,6 +65,11 @@ public class TestData {
     public VenueView venue(String city) {
         return venueService.create(new CreateVenueRequest("Test Hall " + UUID.randomUUID(), city, "Test street 1",
                 List.of(new CreateSectionRequest("Партер", 2, 5))));
+    }
+
+    /** Імітує протухання ключа місця в Redis (SET seat:{id} ... EX 600). */
+    public void forgetSeatClaim(UUID eventSeatId) {
+        redis.delete("seat:" + eventSeatId);
     }
 
     public record PublishedEvent(UUID eventId, User organizer, List<SeatView> seats) {
