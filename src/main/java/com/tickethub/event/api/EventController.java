@@ -6,6 +6,7 @@ import com.tickethub.event.api.dto.EventFilter;
 import com.tickethub.event.api.dto.EventSummary;
 import com.tickethub.event.api.dto.EventView;
 import com.tickethub.event.api.dto.PriceZonesRequest;
+import com.tickethub.event.api.dto.SeatView;
 import com.tickethub.event.api.dto.UpdateEventRequest;
 import com.tickethub.event.service.EventService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -76,8 +78,22 @@ public class EventController {
 
     @PostMapping("/{id}/price-zones")
     @PreAuthorize(OWNER)
-    @Operation(summary = "Задати цінові зони події (власник)")
+    @Operation(summary = "Задати цінові зони та призначити їм місця (власник)")
     public EventView setPriceZones(@PathVariable UUID id, @Valid @RequestBody PriceZonesRequest request) {
         return eventService.setPriceZones(id, request);
+    }
+
+    @PostMapping("/{id}/publish")
+    @PreAuthorize(OWNER)
+    @Operation(summary = "Опублікувати подію — створюються місця на подію (власник)")
+    public EventView publish(@PathVariable UUID id) {
+        return eventService.publish(id);
+    }
+
+    @GetMapping("/{id}/seats")
+    @Operation(summary = "Карта місць зі статусами")
+    public List<SeatView> seats(@PathVariable UUID id,
+                                @Parameter(hidden = true) @AuthenticationPrincipal CurrentUser viewer) {
+        return eventService.seatMap(id, viewer);
     }
 }

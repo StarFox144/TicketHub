@@ -2,6 +2,7 @@ package com.tickethub.event.api;
 
 import com.tickethub.event.api.dto.CreateEventRequest;
 import com.tickethub.event.api.dto.PriceZonesRequest;
+import com.tickethub.event.api.dto.SeatRangeDto;
 import com.tickethub.event.api.dto.UpdateEventRequest;
 import com.tickethub.support.IntegrationTestBase;
 import com.tickethub.user.domain.Role;
@@ -94,9 +95,12 @@ class EventControllerIT extends IntegrationTestBase {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Стендап вечір"));
 
+        var section = sectionOf(id);
         var zones = new PriceZonesRequest(List.of(
-                new PriceZonesRequest.Zone("VIP", new BigDecimal("1200.00"), null),
-                new PriceZonesRequest.Zone("Стандарт", new BigDecimal("600.00"), "UAH")));
+                new PriceZonesRequest.Zone("VIP", new BigDecimal("1200.00"), null,
+                        List.of(new SeatRangeDto(section, 1, 1))),
+                new PriceZonesRequest.Zone("Стандарт", new BigDecimal("600.00"), "UAH",
+                        List.of(new SeatRangeDto(section, 2, null)))));
         mockMvc.perform(post("/api/v1/events/{id}/price-zones", id)
                         .header(HttpHeaders.AUTHORIZATION, testData.bearer(owner))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -105,7 +109,8 @@ class EventControllerIT extends IntegrationTestBase {
                 .andExpect(jsonPath("$.priceZones", hasSize(2)));
 
         // повторний виклик з тією ж назвою зони не повинен падати на UNIQUE (event_id, name)
-        var updated = new PriceZonesRequest(List.of(new PriceZonesRequest.Zone("VIP", new BigDecimal("1500.00"), null)));
+        var updated = new PriceZonesRequest(List.of(new PriceZonesRequest.Zone("VIP", new BigDecimal("1500.00"), null,
+                List.of(SeatRangeDto.wholeSection(section)))));
         mockMvc.perform(post("/api/v1/events/{id}/price-zones", id)
                         .header(HttpHeaders.AUTHORIZATION, testData.bearer(owner))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -116,7 +121,8 @@ class EventControllerIT extends IntegrationTestBase {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.priceZones", hasSize(1)))
                 .andExpect(jsonPath("$.priceZones[0].price").value(1500.00))
-                .andExpect(jsonPath("$.priceZones[0].currency").value("UAH"));
+                .andExpect(jsonPath("$.priceZones[0].currency").value("UAH"))
+                .andExpect(jsonPath("$.priceZones[0].ranges[0].sectionId").value(section.toString()));
     }
 
     @Test
@@ -177,6 +183,11 @@ class EventControllerIT extends IntegrationTestBase {
 
         mockMvc.perform(get("/api/v1/events").param("city", city).param("from", ENDS.toString()))
                 .andExpect(jsonPath("$.content", hasSize(0)));
+    }
+
+    private UUID sectionOf(UUID eventId) {
+        return jdbc.queryForObject("select s.id from sections s join events e on e.venue_id = s.venue_id "
+                + "where e.id = ? limit 1", UUID.class, eventId);
     }
 
     private UUID createEvent(User organizer, String city, String title) throws Exception {

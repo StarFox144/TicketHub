@@ -46,3 +46,12 @@ tickethub:
       secret: ${TICKETHUB_SECURITY_JWT_SECRET:}
       access-token-ttl: 15m
       refresh-token-ttl: 7d
+  booking:
+    reservation-ttl: 10m
+    max-seats-per-order: 10
+    # pessimistic — SELECT ... FOR UPDATE; optimistic — @Version. Див. ReservationConcurrencyTest
+    locking: pessimistic
+    expiration-job:
+      enabled: true
+      interval: 30s
+      batch-size: 100

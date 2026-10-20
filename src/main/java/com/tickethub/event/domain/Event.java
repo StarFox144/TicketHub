@@ -4,6 +4,7 @@ import com.tickethub.common.audit.BaseEntity;
 import com.tickethub.common.exception.BusinessRuleException;
 import com.tickethub.common.exception.ConflictException;
 import com.tickethub.user.domain.User;
+import com.tickethub.venue.domain.Seat;
 import com.tickethub.venue.domain.Venue;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
@@ -19,6 +20,7 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -76,7 +78,7 @@ public class Event extends BaseEntity {
         }
     }
 
-    public record PriceZoneSpec(String name, BigDecimal price, String currency) {
+    public record PriceZoneSpec(String name, BigDecimal price, String currency, List<SeatRange> ranges) {
     }
 
     /**
@@ -92,16 +94,65 @@ public class Event extends BaseEntity {
                 .collect(Collectors.toMap(PriceZoneSpec::name, Function.identity(), (a, b) -> {
                     throw new BusinessRuleException("Duplicate price zone name: " + a.name());
                 }));
+        requireNoOverlaps(specs);
 
         priceZones.removeIf(zone -> !byName.containsKey(zone.getName()));
         Set<String> existing = priceZones.stream().map(PriceZone::getName).collect(Collectors.toSet());
         priceZones.forEach(zone -> {
             var spec = byName.get(zone.getName());
-            zone.reprice(spec.price(), spec.currency());
+            zone.update(spec.price(), spec.currency(), spec.ranges());
         });
         specs.stream()
                 .filter(spec -> !existing.contains(spec.name()))
-                .forEach(spec -> priceZones.add(new PriceZone(this, spec.name(), spec.price(), spec.currency())));
+                .forEach(spec -> priceZones.add(
+                        new PriceZone(this, spec.name(), spec.price(), spec.currency(), spec.ranges())));
+    }
+
+    /** Одне місце не може мати дві ціни: діапазони різних (і однієї) зон не перетинаються. */
+    private static void requireNoOverlaps(List<PriceZoneSpec> specs) {
+        record Owned(String zone, SeatRange range) {
+        }
+        List<Owned> all = specs.stream()
+                .flatMap(spec -> spec.ranges().stream().map(r -> new Owned(spec.name(), r)))
+                .toList();
+        for (int i = 0; i < all.size(); i++) {
+            for (int j = i + 1; j < all.size(); j++) {
+                if (all.get(i).range().overlaps(all.get(j).range())) {
+                    throw new BusinessRuleException("Price zones '%s' and '%s' overlap"
+                            .formatted(all.get(i).zone(), all.get(j).zone()));
+                }
+            }
+        }
+    }
+
+    /**
+     * Публікація «оживляє» фізичні місця залу: кожне місце, покрите ціновою зоною, стає EventSeat.
+     * Місця поза зонами на цю подію не продаються.
+     */
+    public List<EventSeat> publish(Collection<Seat> venueSeats, Instant now) {
+        if (status != EventStatus.DRAFT) {
+            throw new ConflictException("Only DRAFT event can be published, current status is " + status);
+        }
+        if (!startsAt.isAfter(now)) {
+            throw new BusinessRuleException("Event that has already started cannot be published");
+        }
+        List<EventSeat> eventSeats = new ArrayList<>();
+        for (Seat seat : venueSeats) {
+            priceZones.stream()
+                    .filter(zone -> zone.covers(seat.getSection().getId(), seat.getRowNumber()))
+                    .findFirst()
+                    .ifPresent(zone -> eventSeats.add(new EventSeat(this, seat, zone)));
+        }
+        if (eventSeats.isEmpty()) {
+            throw new BusinessRuleException("Price zones do not cover any seat, nothing to sell");
+        }
+        status = EventStatus.PUBLISHED;
+        return eventSeats;
+    }
+
+    /** Продаж відкритий лише для опублікованої події, що ще не почалася. */
+    public boolean isOnSale(Instant now) {
+        return status == EventStatus.PUBLISHED && startsAt.isAfter(now);
     }
 
     private void reschedule(Instant startsAt, Instant endsAt, Instant now) {

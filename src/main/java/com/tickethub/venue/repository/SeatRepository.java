@@ -22,4 +22,7 @@ public interface SeatRepository extends JpaRepository<Seat, UUID> {
             group by s.section.id
             """)
     List<SectionSeatCount> countBySectionForVenue(UUID venueId);
+
+    @Query("select s from Seat s join fetch s.section sec where sec.venue.id = :venueId")
+    List<Seat> findAllByVenueId(UUID venueId);
 }
