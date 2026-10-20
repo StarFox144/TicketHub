@@ -91,7 +91,7 @@ Idempotency-Key: 7b1e4f0a-2c55-4d8e-9a61-0f3c2b7d9e11
 
 Тест перевірено «саботажем»: якщо прибрати `FOR UPDATE`, він падає. Подвійного продажу при цьому все одно немає —
 його ловлять `@Version` і частковий унікальний індекс `order_items` — але покупці отримують помилки замість чистих 409.
-Цифри пропускної здатності «з Redis і без» — етап 6 (k6).
+Під навантаженням k6 — див. [нижче](#навантаження).
 
 ## Redis: прискорення без ризику для коректності
 
@@ -138,24 +138,86 @@ outbox-relay (1 с)  →  RabbitMQ: tickets / order.paid  →  ticket.generate  
 - **Вхід.** `POST /tickets/scan {eventId, code}` — лише організатор цієї події. Квиток пропускає рівно один раз,
   навіть якщо два сканери зчитали його одночасно; повтор — `409` з часом першого проходу.
 
+## Архітектура
+
+```mermaid
+flowchart LR
+    client([Клієнт / сканер на вході])
+    provider([Платіжний провайдер])
+
+    subgraph app [TicketHub — Spring Boot]
+        direction TB
+        api[REST API + JWT + rate limit]
+        booking[booking]
+        payment[payment]
+        relay[outbox relay]
+        ticket[ticket]
+    end
+
+    pg[(PostgreSQL<br/>джерело правди)]
+    redis[(Redis<br/>SET NX, кеш, ліміти)]
+    rabbit[[RabbitMQ<br/>tickets / order.paid]]
+    mail[Mailpit / SMTP]
+
+    client --> api
+    api --> booking & payment & ticket
+    booking -- "резерв: FOR UPDATE" --> pg
+    booking -. "відсів зайнятих місць" .-> redis
+    provider -- "webhook (HMAC)" --> payment
+    payment -- "PAID + outbox в одній транзакції" --> pg
+    relay -- "читає outbox" --> pg
+    relay -- "publisher confirms" --> rabbit
+    rabbit -- "ticket.generate (DLQ після 3 спроб)" --> ticket
+    ticket -- "QR + PDF" --> mail
+```
+
+Модульний моноліт, package-by-feature. Кожен модуль має `api`, `domain`, `repository`, `service`;
+залежності між модулями йдуть лише в один бік:
+
+```mermaid
+flowchart BT
+    event --> user & venue
+    booking --> event & user
+    payment --> booking
+    ticket --> booking & event & user
+```
+
+(Усі модулі також залежать від `common`.)
+
+`ArchitectureTest` (ArchUnit) перевіряє ці межі на байткоді при кожній збірці:
+- між модулями немає циклів;
+- `common` не знає про модулі;
+- чужі `repository` і контролери недоступні — лише сервіси модуля-власника;
+- репозиторії викликаються тільки з сервісів;
+- `domain` не залежить від `service`, `api` чи `repository`.
+
+Ключове рішення моделі: фізичне місце в залі (`Seat`) і місце на конкретну подію (`EventSeat`) — різні сутності.
+Цілісність захищена на рівні БД: `UNIQUE (event_id, seat_id)` і частковий унікальний індекс
+`order_items(event_seat_id) WHERE active`.
+
 ## Тести
 
 ```bash
-./gradlew test
+./gradlew build   # тести + ArchUnit + поріг покриття
 ```
 
 Інтеграційні тести (`*IT`) піднімають справжні PostgreSQL, Redis, RabbitMQ і Mailpit через Testcontainers, тому потрібен запущений Docker.
 `PurchaseFlowE2EIT` проходить увесь сценарій: резерв → оплата → webhook по HTTP → outbox → RabbitMQ → лист із PDF → сканування.
 
-## Структура
+**Покриття (JaCoCo):** 93% рядків, 76% гілок. `./gradlew check` падає, якщо воно опуститься нижче 90% / 70%.
+Звіт — `build/reports/jacoco/test/html/index.html`; у CI відсоток пишеться в summary запуску, а HTML-звіти
+зберігаються як артефакт.
 
-Модульний моноліт, package-by-feature: `common`, `user`, `venue`, `event`, `booking`, `payment`, `ticket`.
-Кожен модуль має `api`, `domain`, `repository`, `service`. Модулі звертаються один до одного лише через сервіси,
-ніколи через чужі репозиторії.
+## Навантаження
 
-Ключове рішення моделі: фізичне місце в залі (`Seat`) і місце на конкретну подію (`EventSeat`) — різні сутності.
-Цілісність захищена на рівні БД: `UNIQUE (event_id, seat_id)` і частковий унікальний індекс
-`order_items(event_seat_id) WHERE active`.
+Сценарій k6 «відкриття продажу» ([load/](load/README.md)): 100 покупців без пауз штурмують перші ряди залу на 1000 місць,
+паралельно 100 переглядів карти місць за секунду. Застосунок обмежено 2 CPU.
+
+| | З Redis | Без Redis |
+|---|---|---|
+| `POST /orders`, запитів/с | **1165 – 1567** | 751 – 779 |
+| `POST /orders`, p95 | **149 – 186 мс** | 312 – 331 мс |
+| Подвійних продажів | 0 | 0 |
 
 ## План
 
@@ -164,4 +226,4 @@ outbox-relay (1 с)  →  RabbitMQ: tickets / order.paid  →  ticket.generate  
 - [x] **Етап 3. Бронювання** — `EventSeat`, публікація, `POST /orders` з песимістичним блокуванням, ідемпотентність, протухання резервів, тест на 50 потоків
 - [x] **Етап 4. Redis** — `SET NX EX`, кеш карти місць, rate limiting
 - [x] **Етап 5. Оплата і квитки** — фейковий провайдер, HMAC-webhook, outbox, RabbitMQ, QR + PDF, email
-- [ ] **Етап 6. Полірування** — JaCoCo, ArchUnit, k6, діаграма архітектури
+- [x] **Етап 6. Полірування** — JaCoCo, ArchUnit, k6, діаграма архітектури

@@ -1,0 +1,56 @@
+# Окремий одноразовий стек для навантажувального тесту: власні БД і Redis (дані в tmpfs, після down зникають),
+# застосунок обмежено 2 CPU, щоб цифри між прогонами були порівнянні. Запуск і порівняння — load/README.md.
+name: tickethub-load
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tickethub
+      POSTGRES_USER: tickethub
+      POSTGRES_PASSWORD: tickethub
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tickethub -d tickethub"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+
+  app:
+    build: ..
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: local   # демо-адмін і організатор потрібні скрипту для створення залу й події
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/tickethub
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_RABBITMQ_HOST: rabbitmq
+      TICKETHUB_RATE_LIMIT_ENABLED: "false"   # інакше k6 упреться в 20 замовлень/хв на користувача
+      TICKETHUB_BOOKING_REDIS_CLAIMS_ENABLED: ${REDIS_CLAIMS:-true}
+      SPRING_CACHE_TYPE: ${CACHE_TYPE:-redis}  # none — карта місць щоразу з БД
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "false"  # SMTP у цьому стеку немає, листи тест не надсилає
+    ports: ["18080:8080"]   # для k6, запущеного поза Docker (див. load/README.md)
+    cpus: 2
+    mem_limit: 1g
+
+  k6:
+    image: grafana/k6:1.3.0
+    profiles: [k6]
+    depends_on: [app]
+    environment:
+      BASE_URL: http://app:8080
+      LABEL: ${LABEL:-run}
+    volumes: [.:/scripts]
+    working_dir: /scripts
+    command: run --quiet booking-rush.js
