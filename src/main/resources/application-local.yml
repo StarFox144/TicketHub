@@ -1,0 +1,8 @@
+spring:
+  flyway:
+    # демо-дані підтягуються лише в локальному профілі
+    locations: classpath:db/migration,classpath:db/seed
+
+logging:
+  level:
+    com.tickethub: DEBUG
