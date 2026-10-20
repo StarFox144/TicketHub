@@ -1,6 +1,7 @@
 package com.tickethub.user.domain;
 
 import com.tickethub.common.audit.BaseEntity;
+import com.tickethub.common.security.CurrentUser;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -39,6 +40,22 @@ public class User extends BaseEntity {
 
     public boolean canOrganize() {
         return enabled && (role == Role.ORGANIZER || role == Role.ADMIN);
+    }
+
+    public void changeRole(Role role) {
+        this.role = role;
+    }
+
+    public void block() {
+        this.enabled = false;
+    }
+
+    public void unblock() {
+        this.enabled = true;
+    }
+
+    public CurrentUser toCurrentUser() {
+        return new CurrentUser(getId(), email, role.name());
     }
 
     public String getEmail() {

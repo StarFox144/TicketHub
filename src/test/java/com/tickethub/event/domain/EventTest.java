@@ -51,13 +51,13 @@ class EventTest {
     void replacePriceZones_upsertsByName() {
         var event = new Event(venue, organizer, "Concert", null, STARTS, ENDS, NOW);
         event.replacePriceZones(List.of(
-                new PriceZoneSpec("VIP", new BigDecimal("1000.00"), "UAH"),
-                new PriceZoneSpec("Стандарт", new BigDecimal("500.00"), "UAH")));
+                new PriceZoneSpec("VIP", new BigDecimal("1000.00"), "UAH", List.of()),
+                new PriceZoneSpec("Стандарт", new BigDecimal("500.00"), "UAH", List.of())));
         var vipBefore = event.getPriceZones().getFirst();
 
         event.replacePriceZones(List.of(
-                new PriceZoneSpec("VIP", new BigDecimal("1500.00"), "UAH"),
-                new PriceZoneSpec("Балкон", new BigDecimal("300.00"), "UAH")));
+                new PriceZoneSpec("VIP", new BigDecimal("1500.00"), "UAH", List.of()),
+                new PriceZoneSpec("Балкон", new BigDecimal("300.00"), "UAH", List.of())));
 
         assertThat(event.getPriceZones())
                 .extracting(PriceZone::getName, PriceZone::getPrice)
@@ -72,8 +72,8 @@ class EventTest {
         var event = new Event(venue, organizer, "Concert", null, STARTS, ENDS, NOW);
 
         assertThatThrownBy(() -> event.replacePriceZones(List.of(
-                new PriceZoneSpec("VIP", BigDecimal.TEN, "UAH"),
-                new PriceZoneSpec("VIP", BigDecimal.ONE, "UAH"))))
+                new PriceZoneSpec("VIP", BigDecimal.TEN, "UAH", List.of()),
+                new PriceZoneSpec("VIP", BigDecimal.ONE, "UAH", List.of()))))
                 .isInstanceOf(BusinessRuleException.class);
     }
 }

@@ -5,6 +5,7 @@ import com.tickethub.venue.api.dto.CreateVenueRequest;
 import com.tickethub.venue.api.dto.UpdateVenueRequest;
 import com.tickethub.venue.api.dto.VenueSummary;
 import com.tickethub.venue.api.dto.VenueView;
+import com.tickethub.venue.domain.Seat;
 import com.tickethub.venue.domain.Section;
 import com.tickethub.venue.domain.Venue;
 import com.tickethub.venue.repository.SeatRepository;
@@ -15,7 +16,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -66,6 +69,16 @@ public class VenueService {
     /** Для інших модулів (event): отримати зал як сутність для зв'язку. */
     public Venue getVenue(UUID id) {
         return venueRepository.findById(id).orElseThrow(() -> new NotFoundException("Venue", id));
+    }
+
+    /** Для модуля event: усі фізичні місця залу разом із секціями (публікація події). */
+    public List<Seat> getSeats(UUID venueId) {
+        return seatRepository.findAllByVenueId(venueId);
+    }
+
+    /** Для модуля event: перевірити, що секції з цінових зон належать залу події. */
+    public Set<UUID> getSectionIds(UUID venueId) {
+        return getVenue(venueId).getSections().stream().map(Section::getId).collect(Collectors.toSet());
     }
 
     private VenueView toView(Venue venue) {

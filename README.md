@@ -3,8 +3,8 @@
 Бекенд сервісу продажу квитків на події з вибором конкретного місця в залі.
 Головна інженерна задача — коректний продаж при одночасних покупках: одне місце ніколи не продається двічі.
 
-**Стек:** Java 21 · Spring Boot 3.5 · PostgreSQL 16 · Flyway · MapStruct · springdoc-openapi · JUnit 5 + Testcontainers.
-Далі за планом: Spring Security + JWT, Redis, RabbitMQ, OpenPDF + ZXing, Mailpit.
+**Стек:** Java 21 · Spring Boot 3.5 · Spring Security + JWT (jjwt) · PostgreSQL 16 · Flyway · MapStruct · springdoc-openapi · JUnit 5 + Testcontainers.
+Далі за планом: Redis, RabbitMQ, OpenPDF + ZXing, Mailpit.
 
 ## Запуск
 
@@ -25,7 +25,74 @@ docker compose up -d postgres redis rabbitmq mailpit   # інфраструкт�
 | Mailpit | http://localhost:8025 |
 
 Профіль `local` додає демо-дані (`db/seed/R__seed_demo.sql`): зал «Палац мистецтв» на 200 місць,
-користувачі `organizer@tickethub.local` і `user@tickethub.local` (пароль `password`) та одна опублікована подія.
+одну опубліковану подію і користувачів (пароль у всіх — `password`):
+
+| Email | Роль |
+|---|---|
+| `admin@tickethub.local` | ADMIN |
+| `organizer@tickethub.local` | ORGANIZER |
+| `user@tickethub.local` | USER |
+
+Поза профілем `local` застосунок не стартує без секрету JWT: задайте `TICKETHUB_SECURITY_JWT_SECRET`
+(base64, щонайменше 256 біт, наприклад `openssl rand -base64 64`).
+
+## Автентифікація
+
+```bash
+curl -X POST localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' \
+     -d '{"email":"organizer@tickethub.local","password":"password"}'
+# → { "tokenType": "Bearer", "accessToken": "...", "accessTokenExpiresAt": "...", "refreshToken": "..." }
+```
+
+- **Access-токен** — JWT (HS512), живе 15 хв, передається як `Authorization: Bearer ...`. Перевіряється без звернення до БД.
+- **Refresh-токен** — випадковий непрозорий рядок, живе 7 днів, у БД зберігається лише його SHA-256 хеш.
+  Кожен `POST /auth/refresh` погашає старий токен і видає нову пару (ротація). Повторне використання вже
+  погашеного токена вважається крадіжкою: відкликаються всі сесії користувача.
+- **Ролі:** самореєстрація завжди дає `USER`; `ORGANIZER`/`ADMIN` призначає адміністратор (`PUT /users/{id}/role`).
+- **Власник події** перевіряється через `@PreAuthorize("hasRole('ORGANIZER') and @eventSecurity.isOwner(#id, authentication)")`.
+  Неіснуюча подія дає 404, чужа — 403; чернетки для сторонніх не існують (404).
+- **Блокування** (`POST /users/{id}/block`) відкликає всі refresh-токени; уже виданий access-токен доживає свої ≤15 хв —
+  свідомий компроміс stateless-підходу.
+
+## Бронювання без подвійного продажу
+
+```
+POST /api/v1/orders
+Authorization: Bearer ...
+Idempotency-Key: 7b1e4f0a-2c55-4d8e-9a61-0f3c2b7d9e11
+
+{ "eventId": "...", "eventSeatIds": ["...", "..."] }
+```
+
+- **Все або нічого:** якщо хоч одне місце зайняте — `409` зі списком `unavailableSeatIds`, жодне місце не резервується.
+- **Резерв на 10 хвилин:** місця → `RESERVED`, замовлення → `PENDING` з `expiresAt`. `ExpiredReservationJob` кожні 30 с
+  переводить прострочені замовлення в `EXPIRED` і повертає місця в продаж. Порції беруться через
+  `SELECT ... FOR UPDATE SKIP LOCKED`, тож кілька інстансів не обробять одне замовлення двічі (ShedLock не потрібен).
+- **Ідемпотентність:** повтор із тим самим `Idempotency-Key` повертає вже створене замовлення (`200` замість `201`),
+  навіть якщо два однакові запити прийшли паралельно. Той самий ключ з іншим набором місць — `422`.
+- **Межі модулів:** `booking` не торкається репозиторіїв `event` — статуси місць змінює лише `EventSeatService`,
+  в транзакції викликача (`Propagation.MANDATORY`), тож резерв місць і замовлення комітяться разом.
+
+### Дві стратегії блокування
+
+Перемикаються властивістю `tickethub.booking.locking`:
+
+| | `pessimistic` (за замовчуванням) | `optimistic` |
+|---|---|---|
+| Механізм | `SELECT ... FOR NO KEY UPDATE`, рядки блокуються в порядку `id` | `@Version`, `UPDATE ... WHERE version = ?` |
+| Конкурент | чекає на блокування, потім бачить `RESERVED` → 409 | отримує 0 оновлених рядків → 409 |
+| Deadlock на перехресних наборах | неможливий завдяки порядку блокування | неможливий, Hibernate впорядковує UPDATE |
+
+`ReservationConcurrencyTest` запускається для обох стратегій на реальному Postgres (Testcontainers):
+
+| Сценарій | Результат (обидві стратегії) |
+|---|---|
+| 50 покупців одночасно на одне місце | 1 замовлення `PENDING`, 49 × `409`, жодної іншої помилки |
+| 30 покупців на 3 спільні місця у випадковому порядку | 1 переможець, 29 × `409`, без deadlock |
+
+Тест перевірено «саботажем»: якщо прибрати `FOR UPDATE`, він падає. Подвійного продажу при цьому все одно немає —
+його ловлять `@Version` і частковий унікальний індекс `order_items` — але покупці отримують помилки замість чистих 409.
+Цифри пропускної здатності «з Redis і без» — етап 6 (k6).
 
 ## Тести
 
@@ -37,7 +104,7 @@ docker compose up -d postgres redis rabbitmq mailpit   # інфраструкт�
 
 ## Структура
 
-Модульний моноліт, package-by-feature: `common`, `user`, `venue`, `event`, далі — `booking`, `payment`, `ticket`.
+Модульний моноліт, package-by-feature: `common`, `user`, `venue`, `event`, `booking`, далі — `payment`, `ticket`.
 Кожен модуль має `api`, `domain`, `repository`, `service`. Модулі звертаються один до одного лише через сервіси,
 ніколи через чужі репозиторії.
 
@@ -48,8 +115,8 @@ docker compose up -d postgres redis rabbitmq mailpit   # інфраструкт�
 ## План
 
 - [x] **Етап 1. Каркас і каталог** — Flyway-схема, зали з генерацією місць, CRUD подій, цінові зони, каталог з фільтрами, RFC 7807, Swagger, Testcontainers
-- [ ] **Етап 2. Користувачі й безпека** — реєстрація, JWT + refresh, ролі, перевірка власника
-- [ ] **Етап 3. Бронювання** — `EventSeat`, публікація, `POST /orders` з песимістичним блокуванням, ідемпотентність, протухання резервів, тест на 50 потоків
+- [x] **Етап 2. Користувачі й безпека** — реєстрація, JWT + refresh, ролі, перевірка власника
+- [x] **Етап 3. Бронювання** — `EventSeat`, публікація, `POST /orders` з песимістичним блокуванням, ідемпотентність, протухання резервів, тест на 50 потоків
 - [ ] **Етап 4. Redis** — `SET NX EX`, кеш карти місць, rate limiting
 - [ ] **Етап 5. Оплата і квитки** — фейковий провайдер, HMAC-webhook, outbox, RabbitMQ, QR + PDF, email
 - [ ] **Етап 6. Полірування** — JaCoCo, ArchUnit, k6, діаграма архітектури

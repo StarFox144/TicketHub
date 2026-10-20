@@ -22,6 +22,6 @@ public record EventView(
     public record VenueRef(UUID id, String name, String city, String address) {
     }
 
-    public record PriceZoneView(UUID id, String name, BigDecimal price, String currency) {
+    public record PriceZoneView(UUID id, String name, BigDecimal price, String currency, List<SeatRangeDto> ranges) {
     }
 }

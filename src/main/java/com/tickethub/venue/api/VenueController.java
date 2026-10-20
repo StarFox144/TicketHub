@@ -12,6 +12,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,18 +36,18 @@ public class VenueController {
         this.venueService = venueService;
     }
 
-    // TODO(етап 2): лише ADMIN
     @PostMapping
-    @Operation(summary = "Створити зал із секціями та згенерувати місця")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Створити зал із секціями та згенерувати місця (ADMIN)")
     public ResponseEntity<VenueView> create(@Valid @RequestBody CreateVenueRequest request) {
         var view = venueService.create(request);
         var location = ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}").buildAndExpand(view.id()).toUri();
         return ResponseEntity.created(location).body(view);
     }
 
-    // TODO(етап 2): лише ADMIN
     @PutMapping("/{id}")
-    @Operation(summary = "Оновити назву та адресу залу")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Оновити назву та адресу залу (ADMIN)")
     public VenueView update(@PathVariable UUID id, @Valid @RequestBody UpdateVenueRequest request) {
         return venueService.update(id, request);
     }

@@ -2,8 +2,10 @@ package com.tickethub.event.service;
 
 import com.tickethub.event.api.dto.EventSummary;
 import com.tickethub.event.api.dto.EventView;
+import com.tickethub.event.api.dto.SeatRangeDto;
 import com.tickethub.event.domain.Event;
 import com.tickethub.event.domain.PriceZone;
+import com.tickethub.event.domain.SeatRange;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
@@ -18,4 +20,8 @@ public interface EventMapper {
     EventSummary toSummary(Event event);
 
     EventView.PriceZoneView toView(PriceZone zone);
+
+    SeatRangeDto toDto(SeatRange range);
+
+    SeatRange toDomain(SeatRangeDto dto);
 }

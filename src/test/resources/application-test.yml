@@ -1,0 +1,8 @@
+tickethub:
+  security:
+    jwt:
+      secret: dfZiwv0WQekZbFyngwlsU1+ly1+hkpgDo6abRgLVVtkbBePhPqPzZs42IQtyFjpYEfQXglmy+pwJ++vPqJI01A==
+  booking:
+    expiration-job:
+      # у тестах job викликається напряму
+      enabled: false
