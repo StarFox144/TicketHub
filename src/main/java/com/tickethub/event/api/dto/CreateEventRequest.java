@@ -7,12 +7,9 @@ import jakarta.validation.constraints.Size;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * organizerId — тимчасово, до етапу 2: потім організатор береться з JWT поточного користувача.
- */
+/** Організатор події — поточний користувач з JWT. */
 public record CreateEventRequest(
         @NotNull UUID venueId,
-        @NotNull UUID organizerId,
         @NotBlank @Size(max = 255) String title,
         @Size(max = 10_000) String description,
         @NotNull Instant startsAt,

@@ -6,7 +6,7 @@ import java.util.Map;
 
 /** Базовий клас доменних винятків; GlobalExceptionHandler перетворює його на ProblemDetail. */
 public abstract sealed class DomainException extends RuntimeException
-        permits NotFoundException, ConflictException, BusinessRuleException {
+        permits NotFoundException, ConflictException, BusinessRuleException, UnauthorizedException {
 
     protected DomainException(String message) {
         super(message);

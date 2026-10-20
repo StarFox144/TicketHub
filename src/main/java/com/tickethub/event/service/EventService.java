@@ -2,6 +2,7 @@ package com.tickethub.event.service;
 
 import com.tickethub.common.exception.BusinessRuleException;
 import com.tickethub.common.exception.NotFoundException;
+import com.tickethub.common.security.CurrentUser;
 import com.tickethub.event.api.dto.CreateEventRequest;
 import com.tickethub.event.api.dto.EventFilter;
 import com.tickethub.event.api.dto.EventSummary;
@@ -12,6 +13,7 @@ import com.tickethub.event.domain.Event;
 import com.tickethub.event.domain.Event.PriceZoneSpec;
 import com.tickethub.event.domain.EventStatus;
 import com.tickethub.event.repository.EventRepository;
+import com.tickethub.user.domain.Role;
 import com.tickethub.user.service.UserService;
 import com.tickethub.venue.service.VenueService;
 import org.springframework.data.domain.Page;
@@ -51,8 +53,9 @@ public class EventService {
     }
 
     @Transactional
-    public EventView create(CreateEventRequest request) {
-        var organizer = userService.getById(request.organizerId());
+    public EventView create(UUID organizerId, CreateEventRequest request) {
+        // роль уже перевірена в контролері, але токен міг бути виданий до блокування
+        var organizer = userService.getById(organizerId);
         if (!organizer.canOrganize()) {
             throw new BusinessRuleException("User %s cannot organize events".formatted(organizer.getId()));
         }
@@ -81,8 +84,21 @@ public class EventService {
         return mapper.toView(event);
     }
 
-    public EventView get(UUID id) {
-        return mapper.toView(getEvent(id));
+    /**
+     * Чернетку бачать лише її організатор і адміністратор; для решти її не існує (404, а не 403),
+     * щоб не розкривати навіть факт наявності неопублікованої події.
+     */
+    public EventView get(UUID id, CurrentUser viewer) {
+        var event = getEvent(id);
+        if (event.getStatus() == EventStatus.DRAFT && !canSeeDraft(event, viewer)) {
+            throw new NotFoundException("Event", id);
+        }
+        return mapper.toView(event);
+    }
+
+    private static boolean canSeeDraft(Event event, CurrentUser viewer) {
+        return viewer != null
+                && (viewer.hasRole(Role.ADMIN.name()) || event.getOrganizer().getId().equals(viewer.id()));
     }
 
     /** Публічний каталог: лише опубліковані події. */

@@ -6,3 +6,9 @@ spring:
 logging:
   level:
     com.tickethub: DEBUG
+
+tickethub:
+  security:
+    jwt:
+      # лише для локальної розробки
+      secret: DL+mwDAuVYX29D847dHlujsl1K4IOMkD25tIYvoHA75ktDmlBS1WfwwA6l7wYzY1rNiVOCj9l5aijcNG/oHQ2g==

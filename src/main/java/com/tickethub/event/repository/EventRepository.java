@@ -7,6 +7,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -19,4 +20,7 @@ public interface EventRepository extends JpaRepository<Event, UUID>, JpaSpecific
 
     @EntityGraph(attributePaths = {"venue", "priceZones"})
     Optional<Event> findDetailedById(UUID id);
+
+    @Query("select e.organizer.id from Event e where e.id = :id")
+    Optional<UUID> findOrganizerIdById(UUID id);
 }

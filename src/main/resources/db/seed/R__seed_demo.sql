@@ -1,11 +1,13 @@
 -- Демо-дані для профілю local. Ідемпотентно: фіксовані id + ON CONFLICT DO NOTHING.
--- Пароль обох користувачів: password
+-- Пароль усіх демо-користувачів: password
 
 INSERT INTO users (id, email, password_hash, full_name, role) VALUES
     ('00000000-0000-0000-0000-000000000001', 'organizer@tickethub.local',
      '$2a$10$iwoMbyMpnGaN6zIMwZJ9SezE4j9ch20UQpCzRevT54DE02BesmThi', 'Demo Organizer', 'ORGANIZER'),
     ('00000000-0000-0000-0000-000000000002', 'user@tickethub.local',
-     '$2a$10$iwoMbyMpnGaN6zIMwZJ9SezE4j9ch20UQpCzRevT54DE02BesmThi', 'Demo User', 'USER')
+     '$2a$10$iwoMbyMpnGaN6zIMwZJ9SezE4j9ch20UQpCzRevT54DE02BesmThi', 'Demo User', 'USER'),
+    ('00000000-0000-0000-0000-000000000003', 'admin@tickethub.local',
+     '$2a$10$iwoMbyMpnGaN6zIMwZJ9SezE4j9ch20UQpCzRevT54DE02BesmThi', 'Demo Admin', 'ADMIN')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO venues (id, name, city, address) VALUES

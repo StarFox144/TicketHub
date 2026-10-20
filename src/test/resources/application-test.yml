@@ -1,0 +1,4 @@
+tickethub:
+  security:
+    jwt:
+      secret: dfZiwv0WQekZbFyngwlsU1+ly1+hkpgDo6abRgLVVtkbBePhPqPzZs42IQtyFjpYEfQXglmy+pwJ++vPqJI01A==

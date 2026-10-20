@@ -1,9 +1,11 @@
 package com.tickethub.venue.api;
 
 import com.tickethub.support.IntegrationTestBase;
+import com.tickethub.user.domain.Role;
 import com.tickethub.venue.api.dto.CreateSectionRequest;
 import com.tickethub.venue.api.dto.CreateVenueRequest;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
 import java.util.List;
@@ -19,15 +21,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class VenueControllerIT extends IntegrationTestBase {
 
-    @Test
-    void createVenue_generatesSeats_andCanBeFetched() throws Exception {
-        var request = new CreateVenueRequest("Опера", "Львів", "пр. Свободи, 28", List.of(
-                new CreateSectionRequest("Партер", 10, 15),
-                new CreateSectionRequest("Балкон", 5, 10)));
+    private static final CreateVenueRequest OPERA = new CreateVenueRequest("Опера", "Львів", "пр. Свободи, 28", List.of(
+            new CreateSectionRequest("Партер", 10, 15),
+            new CreateSectionRequest("Балкон", 5, 10)));
 
+    @Test
+    void createVenue_generatesSeats_andIsPubliclyReadable() throws Exception {
         var response = mockMvc.perform(post("/api/v1/venues")
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(request)))
+                        .content(json(OPERA)))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", containsString("/api/v1/venues/")))
                 .andExpect(jsonPath("$.capacity").value(200))
@@ -45,10 +48,44 @@ class VenueControllerIT extends IntegrationTestBase {
     }
 
     @Test
+    void createVenue_withoutToken_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/venues")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(OPERA)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("Content-Type", containsString("application/problem+json")));
+    }
+
+    @Test
+    void createVenue_byOrganizer_returns403() throws Exception {
+        mockMvc.perform(post("/api/v1/venues")
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.ORGANIZER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(OPERA)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+    }
+
+    @Test
+    void createVenue_withTamperedToken_returns401() throws Exception {
+        var token = testData.bearer(Role.ADMIN);
+        // міняємо перший символ підпису на гарантовано інший
+        int signatureStart = token.lastIndexOf('.') + 1;
+        char replacement = token.charAt(signatureStart) == 'A' ? 'B' : 'A';
+        var tampered = token.substring(0, signatureStart) + replacement + token.substring(signatureStart + 1);
+        mockMvc.perform(post("/api/v1/venues")
+                        .header(HttpHeaders.AUTHORIZATION, tampered)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(OPERA)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void createVenue_withInvalidBody_returnsProblemDetail() throws Exception {
         var request = new CreateVenueRequest("", "Київ", "addr", List.of());
 
         mockMvc.perform(post("/api/v1/venues")
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.ADMIN))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(request)))
                 .andExpect(status().isBadRequest())

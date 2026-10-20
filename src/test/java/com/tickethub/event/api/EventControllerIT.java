@@ -4,10 +4,11 @@ import com.tickethub.event.api.dto.CreateEventRequest;
 import com.tickethub.event.api.dto.PriceZonesRequest;
 import com.tickethub.event.api.dto.UpdateEventRequest;
 import com.tickethub.support.IntegrationTestBase;
-import com.tickethub.support.TestData;
 import com.tickethub.user.domain.Role;
+import com.tickethub.user.domain.User;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -31,20 +32,17 @@ class EventControllerIT extends IntegrationTestBase {
     private static final Instant ENDS = STARTS.plus(Duration.ofHours(2));
 
     @Autowired
-    private TestData testData;
-
-    @Autowired
     private JdbcTemplate jdbc;
 
     @Test
-    void createEvent_startsAsDraft() throws Exception {
+    void createEvent_organizerComesFromToken() throws Exception {
         var organizer = testData.user(Role.ORGANIZER);
         var venue = testData.venue("Київ");
 
         mockMvc.perform(post("/api/v1/events")
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(organizer))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(new CreateEventRequest(venue.id(), organizer.getId(), "Рок-концерт",
-                                "Опис", STARTS, ENDS))))
+                        .content(json(new CreateEventRequest(venue.id(), "Рок-концерт", "Опис", STARTS, ENDS))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("DRAFT"))
                 .andExpect(jsonPath("$.venue.id").value(venue.id().toString()))
@@ -52,34 +50,45 @@ class EventControllerIT extends IntegrationTestBase {
     }
 
     @Test
-    void createEvent_byRegularUser_isRejected() throws Exception {
-        var user = testData.user(Role.USER);
+    void createEvent_byRegularUser_returns403() throws Exception {
+        var venue = testData.venue("Київ");
+
+        mockMvc.perform(post("/api/v1/events")
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.USER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(new CreateEventRequest(venue.id(), "Концерт", null, STARTS, ENDS))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void createEvent_anonymous_returns401() throws Exception {
         var venue = testData.venue("Київ");
 
         mockMvc.perform(post("/api/v1/events")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(new CreateEventRequest(venue.id(), user.getId(), "Концерт", null, STARTS, ENDS))))
-                .andExpect(status().isUnprocessableEntity());
+                        .content(json(new CreateEventRequest(venue.id(), "Концерт", null, STARTS, ENDS))))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
     void createEvent_endingBeforeStart_returns422() throws Exception {
-        var organizer = testData.user(Role.ORGANIZER);
         var venue = testData.venue("Київ");
 
         mockMvc.perform(post("/api/v1/events")
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.ORGANIZER))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(new CreateEventRequest(venue.id(), organizer.getId(), "Концерт", null,
-                                ENDS, STARTS))))
+                        .content(json(new CreateEventRequest(venue.id(), "Концерт", null, ENDS, STARTS))))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.detail").value("Event must end after it starts"));
     }
 
     @Test
-    void updateEvent_andSetPriceZones() throws Exception {
-        var id = createEvent("Київ", "Стендап");
+    void owner_canUpdateEvent_andSetPriceZones() throws Exception {
+        var owner = testData.user(Role.ORGANIZER);
+        var id = createEvent(owner, "Київ", "Стендап");
 
         mockMvc.perform(put("/api/v1/events/{id}", id)
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(new UpdateEventRequest("Стендап вечір", "Новий опис", STARTS, ENDS))))
                 .andExpect(status().isOk())
@@ -89,6 +98,7 @@ class EventControllerIT extends IntegrationTestBase {
                 new PriceZonesRequest.Zone("VIP", new BigDecimal("1200.00"), null),
                 new PriceZonesRequest.Zone("Стандарт", new BigDecimal("600.00"), "UAH")));
         mockMvc.perform(post("/api/v1/events/{id}/price-zones", id)
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(zones)))
                 .andExpect(status().isOk())
@@ -97,11 +107,12 @@ class EventControllerIT extends IntegrationTestBase {
         // повторний виклик з тією ж назвою зони не повинен падати на UNIQUE (event_id, name)
         var updated = new PriceZonesRequest(List.of(new PriceZonesRequest.Zone("VIP", new BigDecimal("1500.00"), null)));
         mockMvc.perform(post("/api/v1/events/{id}/price-zones", id)
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(owner))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(updated)))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/v1/events/{id}", id))
+        mockMvc.perform(get("/api/v1/events/{id}", id).header(HttpHeaders.AUTHORIZATION, testData.bearer(owner)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.priceZones", hasSize(1)))
                 .andExpect(jsonPath("$.priceZones[0].price").value(1500.00))
@@ -109,15 +120,50 @@ class EventControllerIT extends IntegrationTestBase {
     }
 
     @Test
+    void anotherOrganizer_cannotUpdateEvent() throws Exception {
+        var id = createEvent(testData.user(Role.ORGANIZER), "Київ", "Чужа подія");
+
+        mockMvc.perform(put("/api/v1/events/{id}", id)
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.ORGANIZER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(new UpdateEventRequest("Захоплено", null, STARTS, ENDS))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void updateUnknownEvent_returns404_not403() throws Exception {
+        mockMvc.perform(put("/api/v1/events/{id}", UUID.randomUUID())
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.ORGANIZER))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(new UpdateEventRequest("Назва", null, STARTS, ENDS))))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void draftEvent_isHiddenFromPublicAndOtherUsers_butVisibleToAdmin() throws Exception {
+        var id = createEvent(testData.user(Role.ORGANIZER), "Київ", "Секретна чернетка");
+
+        mockMvc.perform(get("/api/v1/events/{id}", id))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/events/{id}", id).header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.USER)))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/events/{id}", id).header(HttpHeaders.AUTHORIZATION, testData.bearer(Role.ADMIN)))
+                .andExpect(status().isOk());
+
+        jdbc.update("update events set status = 'PUBLISHED' where id = ?", id);
+        mockMvc.perform(get("/api/v1/events/{id}", id))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void catalog_showsOnlyPublishedEvents_filteredByCityAndQuery() throws Exception {
         var city = "Місто-" + UUID.randomUUID();
-        var published = createEvent(city, "Джаз у парку");
-        createEvent(city, "Джаз чернетка");
-        createEvent(city, "Опера");
+        var organizer = testData.user(Role.ORGANIZER);
+        var published = createEvent(organizer, city, "Джаз у парку");
+        createEvent(organizer, city, "Джаз чернетка");
+        var opera = createEvent(organizer, city, "Опера");
         // публікація з'явиться на етапі 3, поки що переводимо статус напряму
-        jdbc.update("update events set status = 'PUBLISHED' where id = ?", published);
-        jdbc.update("update events set status = 'PUBLISHED' where title = 'Опера' and venue_id in "
-                + "(select id from venues where city = ?)", city);
+        jdbc.update("update events set status = 'PUBLISHED' where id in (?, ?)", published, opera);
 
         mockMvc.perform(get("/api/v1/events").param("city", city).param("q", "джаз"))
                 .andExpect(status().isOk())
@@ -133,12 +179,12 @@ class EventControllerIT extends IntegrationTestBase {
                 .andExpect(jsonPath("$.content", hasSize(0)));
     }
 
-    private UUID createEvent(String city, String title) throws Exception {
-        var organizer = testData.user(Role.ORGANIZER);
+    private UUID createEvent(User organizer, String city, String title) throws Exception {
         var venue = testData.venue(city);
         var response = mockMvc.perform(post("/api/v1/events")
+                        .header(HttpHeaders.AUTHORIZATION, testData.bearer(organizer))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(new CreateEventRequest(venue.id(), organizer.getId(), title, null, STARTS, ENDS))))
+                        .content(json(new CreateEventRequest(venue.id(), title, null, STARTS, ENDS))))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         return UUID.fromString(objectMapper.readTree(response).get("id").asText());
